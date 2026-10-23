@@ -3,18 +3,17 @@
 # Image Setup
 #--------------------------------------------------------------------------
 #
-# To edit the 'php-fpm' base Image, visit its repository on Github
-#    https://github.com/Laradock/php-fpm
+# The laradock/php-fpm base image (https://github.com/Laradock/php-fpm) is
+# rebuilt here on top of the official PHP image, pinned to a patch release,
+# so PHP security fixes don't depend on laradock's weekly rebuilds.
 #
-# To change its version, see the available Tags on the Docker Hub:
-#    https://hub.docker.com/r/laradock/php-fpm/tags/
-#
-# Note: Base Image name format {image-tag}-{php-version}
+# PHP2Shell (CVE-2026-109618 / CVE-2026-109619): PHP >= 8.2.35 required.
+# To pick up a new PHP security release, bump PHP_FPM_BASE_IMAGE and rebuild
+# with `docker compose build --pull php-fpm`.
 #
 
-ARG LARADOCK_PHP_VERSION
-ARG BASE_IMAGE_TAG_PREFIX=latest
-FROM laradock/php-fpm:${BASE_IMAGE_TAG_PREFIX}-${LARADOCK_PHP_VERSION}
+ARG PHP_FPM_BASE_IMAGE=php:8.2.35-fpm-bookworm
+FROM ${PHP_FPM_BASE_IMAGE}
 
 LABEL maintainer="Mahmoud Zalt <mahmoud@zalt.me>"
 
@@ -22,6 +21,48 @@ ARG LARADOCK_PHP_VERSION
 
 # Set Environment Variables
 ENV DEBIAN_FRONTEND noninteractive
+
+# Base layers from laradock/php-fpm Dockerfile-8.2
+RUN set -eux; \
+    apt-get update; \
+    apt-get upgrade -y; \
+    apt-get install -y --no-install-recommends \
+            curl \
+            libmemcached-dev \
+            libz-dev \
+            libpq-dev \
+            libjpeg-dev \
+            libpng-dev \
+            libfreetype6-dev \
+            libssl-dev \
+            libwebp-dev \
+            libxpm-dev \
+            libmcrypt-dev \
+            libonig-dev; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    docker-php-ext-install pdo_mysql; \
+    docker-php-ext-install pdo_pgsql; \
+    docker-php-ext-configure gd \
+            --prefix=/usr \
+            --with-jpeg \
+            --with-webp \
+            --with-xpm \
+            --with-freetype; \
+    docker-php-ext-install gd; \
+    php -r 'var_dump(gd_info());'
+
+# Refuse to build if the PHP branch doesn't match PHP_VERSION in .env,
+# or if PHP is still affected by PHP2Shell (CVE-2026-109618 / CVE-2026-109619)
+RUN set -eux; \
+    [ "$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')" = "${LARADOCK_PHP_VERSION}" ]; \
+    php -r '$fixed = ["8.2" => "8.2.35", "8.3" => "8.3.36", "8.4" => "8.4.27", "8.5" => "8.5.12"]; \
+      $branch = PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION; \
+      if (!isset($fixed[$branch]) || version_compare(PHP_VERSION, $fixed[$branch], "<")) { \
+        fwrite(STDERR, "PHP " . PHP_VERSION . " is vulnerable to CVE-2026-109618 / CVE-2026-109619\n"); \
+        exit(1); \
+      }'
 
 # If you're in China, or you need to change sources, will be set CHANGE_SOURCE to true in .env.
 
